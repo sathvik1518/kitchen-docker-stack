@@ -1,0 +1,11 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # If any test fails, this step fails, the job fails, and the deploy is blocked.
+      - name: Run the regression tests against the real stack
+        run: docker compose --profile test run --rm --build tests

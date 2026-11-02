@@ -1,0 +1,63 @@
+# Starts the whole kitchen: api + db + redis. The tests service is only started on purpose (profile "test").
+#   docker compose up --build                      -> run the app
+#   docker compose --profile test run --rm tests   -> run the tests against the real stack
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kitchen
+      POSTGRES_PASSWORD: kitchen # for local development only. Never reuse this in production.
+      POSTGRES_DB: kitchen
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kitchen -d kitchen"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      target: runtime
+    environment:
+      DATABASE_URL: postgresql://kitchen:kitchen@db:5432/kitchen
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Layer 2 health check: can it really work? Asks /health/deep, which asks the database and Redis.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/deep', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    environment:
+      API_URL: http://api:8000
+      DATABASE_URL: postgresql://kitchen:kitchen@db:5432/kitchen
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
